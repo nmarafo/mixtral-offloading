@@ -56,12 +56,12 @@ class HQQLinearTritonSavable(HQQLinear):
         pass
         
     def forward_training(self, x):
-        assert self.ready, "El modelo no ha sido cuantificado"
+        assert self.ready, "The model has not been quantified"
         assert self.meta['axis'] == 0
 
         W_q, meta = self.W_q, self.meta
 
-        # Desquantificar si es necesario
+        # Dequantify if necessary
         if 'quant_scale' in meta and meta['quant_scale']:
             meta['scale'] = Quantizer.dequantize(meta['scale_q'], meta['meta_scale'])
         if 'quant_zero' in meta and meta['quant_zero']:
@@ -70,7 +70,7 @@ class HQQLinearTritonSavable(HQQLinear):
         K = meta['shape'][1]
         N = meta['shape'][0]
 
-        # Elegir la función adecuada para la multiplicación de matrices
+        # Choosing the right function for matrix multiplication
         if self.meta['nbits'] == 4:
            fn = triton_matmul4_transpose
         elif self.meta['nbits'] == 3:
@@ -80,7 +80,7 @@ class HQQLinearTritonSavable(HQQLinear):
         else:
            raise RuntimeError(f"nbits == {self.meta['nbits']} isn't yet supported")
 
-        # Realizar la multiplicación de matrices
+        # Perform matrix multiplication
         output = fn(
            meta['group_size'], x,
            W_q.view(-1, K),

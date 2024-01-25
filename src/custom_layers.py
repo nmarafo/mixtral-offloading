@@ -47,11 +47,50 @@ class HQQLinearTritonSavable(HQQLinear):
             self.W_q = Quantizer.pack[self.meta['packing']](W_q)
     
     def forward(self, x):
-        return self.forward_triton(x)
+        if self.training:
+           return self.forward_training(x)
+        else:
+           return self.forward_triton(x)
     
     def set_backend(self, backend):
         pass
-    
+        
+    def forward_training(self, x):
+        assert self.ready, "El modelo no ha sido cuantificado"
+        assert self.meta['axis'] == 0
+
+        W_q, meta = self.W_q, self.meta
+
+        # Desquantificar si es necesario
+        if 'quant_scale' in meta and meta['quant_scale']:
+            meta['scale'] = Quantizer.dequantize(meta['scale_q'], meta['meta_scale'])
+        if 'quant_zero' in meta and meta['quant_zero']:
+            meta['zero'] = Quantizer.dequantize(meta['zero_q'], meta['meta_zero'])
+
+        K = meta['shape'][1]
+        N = meta['shape'][0]
+
+        # Elegir la función adecuada para la multiplicación de matrices
+        if self.meta['nbits'] == 4:
+           fn = triton_matmul4_transpose
+        elif self.meta['nbits'] == 3:
+           fn = functools.partial(triton_matmul3_transpose, N=N)
+        elif self.meta['nbits'] == 2:
+           fn = triton_matmul2_transpose
+        else:
+           raise RuntimeError(f"nbits == {self.meta['nbits']} isn't yet supported")
+
+        # Realizar la multiplicación de matrices
+        output = fn(
+           meta['group_size'], x,
+           W_q.view(-1, K),
+           meta['scale'].view(-1, K),
+           meta['zero'].view(-1, K),
+           bias=self.bias if hasattr(self, 'bias') else None,
+        )
+
+        return output
+
     @torch.inference_mode()
     def forward_triton(self, x):
         assert self.ready, "model was not quantized"
